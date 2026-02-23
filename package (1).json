@@ -1,0 +1,240 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Camera, MessageSquare, ChevronLeft, ChevronRight, X, Play, Image, Download } from 'lucide-react';
+import api from '../utils/api';
+import { useEventSocket } from '../hooks/useSocket';
+import { Spinner } from '../components/UI';
+
+/* ── Lightbox ───────────────────────────────────────────────────────────── */
+const Lightbox = ({ items, index, onClose, onNav }) => {
+  const item = items[index];
+  useEffect(() => {
+    const handler = e => {
+      if (e.key === 'Escape')      onClose();
+      if (e.key === 'ArrowLeft')   onNav(-1);
+      if (e.key === 'ArrowRight')  onNav(+1);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose, onNav]);
+
+  if (!item) return null;
+  return (
+    <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(14,10,8,.94)' }}
+      onClick={onClose}>
+      <button onClick={onClose}
+        className="absolute top-5 right-5 w-10 h-10 rounded-full bg-white bg-opacity-10 hover:bg-opacity-20 flex items-center justify-center text-white transition z-10">
+        <X size={20}/>
+      </button>
+      <button onClick={e=>{e.stopPropagation();onNav(-1);}} disabled={index===0}
+        className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white bg-opacity-10 hover:bg-opacity-20 flex items-center justify-center text-white transition disabled:opacity-20">
+        <ChevronLeft size={22}/>
+      </button>
+      <button onClick={e=>{e.stopPropagation();onNav(+1);}} disabled={index===items.length-1}
+        className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white bg-opacity-10 hover:bg-opacity-20 flex items-center justify-center text-white transition disabled:opacity-20">
+        <ChevronRight size={22}/>
+      </button>
+
+      <motion.div key={item.id} initial={{opacity:0,scale:.97}} animate={{opacity:1,scale:1}}
+        className="max-w-5xl max-h-[85vh] w-full h-full flex items-center justify-center px-16"
+        onClick={e => e.stopPropagation()}>
+        {item.type === 'video' ? (
+          <video src={item.original_url} controls autoPlay muted loop
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"/>
+        ) : (
+          <img src={item.original_url} alt=""
+            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"/>
+        )}
+      </motion.div>
+
+      {item.uploader_name && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-white text-sm opacity-60">
+          by {item.uploader_name}
+        </div>
+      )}
+    </motion.div>
+  );
+};
+
+/* ── Gallery card ───────────────────────────────────────────────────────── */
+const GalleryCard = ({ item, onClick }) => {
+  if (item.type === 'message') return (
+    <div className="aspect-square rounded-[var(--r-lg)] flex flex-col items-center justify-center p-5 text-center"
+      style={{ background: 'linear-gradient(135deg,#fafaf9,#f0ebe0)' }}>
+      <MessageSquare size={16} className="text-[var(--gold-400)] mb-3"/>
+      <p className="text-xs text-[var(--stone-700)] italic line-clamp-5">"{item.message_body}"</p>
+      <p className="text-xs text-[var(--stone-400)] mt-3">— {item.uploader_name || 'Guest'}</p>
+    </div>
+  );
+
+  return (
+    <div
+      className="aspect-square rounded-[var(--r-lg)] overflow-hidden bg-[var(--stone-100)] cursor-pointer group relative"
+      onClick={onClick}
+    >
+      {(item.thumbnail_url || item.original_url) ? (
+        <img src={item.thumbnail_url||item.original_url} alt=""
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy"/>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-[var(--stone-300)]"><Image size={28}/></div>
+      )}
+      {item.type === 'video' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-white bg-opacity-80 flex items-center justify-center shadow">
+            <Play size={15} className="ml-0.5"/>
+          </div>
+        </div>
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute bottom-2.5 left-3">
+          <p className="text-white text-xs font-medium truncate">{item.uploader_name}</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ── Gallery Page ───────────────────────────────────────────────────────── */
+export default function GalleryPage() {
+  const { token } = useParams();
+  const [event,  setEvent]  = useState(null);
+  const [items,  setItems]  = useState([]);
+  const [loading,setLoading]= useState(true);
+  const [cursor, setCursor] = useState(null);
+  const [more,   setMore]   = useState(true);
+  const [lbIdx,  setLbIdx]  = useState(null);
+  const [newCount, setNew]  = useState(0);
+  const loaderRef = useRef(null);
+
+  const mediaItems = items.filter(i => i.type !== 'message');
+
+  useEffect(() => {
+    api.get(`/public/events/${token}`)
+      .then(r => setEvent(r.data))
+      .catch(() => {});
+    api.get(`/public/events/${token}/gallery?limit=40`)
+      .then(r => {
+        setItems(r.data.items);
+        setCursor(r.data.next_cursor);
+        setMore(!!r.data.next_cursor);
+      })
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  useEventSocket(event?.id, newItem => {
+    setItems(prev => {
+      if (prev.find(i => i.id === newItem.id)) return prev;
+      setNew(c => c + 1);
+      return [newItem, ...prev];
+    });
+  });
+
+  const loadMore = useCallback(async () => {
+    if (!more || !cursor) return;
+    const { data } = await api.get(`/public/events/${token}/gallery?cursor=${cursor}&limit=40`);
+    setItems(p => [...p, ...data.items]);
+    setCursor(data.next_cursor);
+    setMore(!!data.next_cursor);
+  }, [token, cursor, more]);
+
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      e => { if (e[0].isIntersecting) loadMore(); },
+      { threshold: 0.1 }
+    );
+    if (loaderRef.current) obs.observe(loaderRef.current);
+    return () => obs.disconnect();
+  }, [loadMore]);
+
+  const openLightbox = item => {
+    const idx = mediaItems.findIndex(m => m.id === item.id);
+    if (idx >= 0) setLbIdx(idx);
+  };
+
+  const navLightbox = dir => setLbIdx(p => {
+    const next = p + dir;
+    return (next < 0 || next >= mediaItems.length) ? p : next;
+  });
+
+  return (
+    <div className="min-h-screen bg-[var(--stone-50)]">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-white bg-opacity-90 backdrop-blur-md border-b border-[var(--stone-100)]">
+        <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+          <div>
+            <h1 className="font-display text-xl">{event?.title || 'Gallery'}</h1>
+            <p className="text-xs text-[var(--stone-400)]">{items.length} memories</p>
+          </div>
+          <Link to={`/e/${token}`}>
+            <button className="flex items-center gap-2 bg-[var(--stone-900)] text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-[var(--stone-800)] transition">
+              <Camera size={15}/> Upload
+            </button>
+          </Link>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 sm:px-5 py-7">
+        {/* New-items banner */}
+        <AnimatePresence>
+          {newCount > 0 && (
+            <motion.div initial={{opacity:0,y:-10}} animate={{opacity:1,y:0}} exit={{opacity:0}}
+              className="mb-5 flex justify-center">
+              <button onClick={() => { setNew(0); window.scrollTo({top:0,behavior:'smooth'}); }}
+                className="bg-[var(--gold-400)] text-white px-5 py-2 rounded-full text-sm font-medium shadow-lg hover:bg-[var(--gold-500)] transition">
+                ↑ {newCount} new photo{newCount!==1?'s':''} — tap to view
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {loading ? (
+          <div className="flex justify-center py-24"><Spinner size={44}/></div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-24">
+            <Camera size={44} className="mx-auto mb-4 text-[var(--stone-200)]"/>
+            <h2 className="font-display text-2xl mb-2">No photos yet</h2>
+            <p className="text-[var(--stone-400)] mb-6 text-sm">Be the first to share a memory!</p>
+            <Link to={`/e/${token}`}>
+              <button className="bg-[var(--stone-900)] text-white px-6 py-3 rounded-full font-medium hover:bg-[var(--stone-800)] transition">
+                Upload Photos
+              </button>
+            </Link>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
+              <AnimatePresence>
+                {items.map((item, i) => (
+                  <motion.div key={item.id} layout
+                    initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} transition={{delay:Math.min(i*.02,.3)}}>
+                    <GalleryCard item={item} onClick={item.type!=='message' ? () => openLightbox(item) : undefined}/>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+
+            {more && (
+              <div ref={loaderRef} className="flex justify-center py-10">
+                <Spinner size={32}/>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      <AnimatePresence>
+        {lbIdx !== null && (
+          <Lightbox
+            items={mediaItems}
+            index={lbIdx}
+            onClose={() => setLbIdx(null)}
+            onNav={navLightbox}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

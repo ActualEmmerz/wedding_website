@@ -1,0 +1,101 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { Button, Input, Card } from '../components/UI';
+
+export default function AdminLogin() {
+  const [mode, setMode] = useState('login');
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const { login, register } = useAuth();
+  const { toast } = useToast();
+  const nav = useNavigate();
+
+  const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      if (mode === 'login') await login(form.email, form.password);
+      else                  await register(form.email, form.password, form.name);
+      nav('/admin');
+    } catch (err) {
+      toast(err.response?.data?.error || 'Something went wrong', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[var(--stone-900)] flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Decorative circles */}
+      <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-[var(--gold-400)] opacity-5 blur-3xl" />
+      <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-rose-400 opacity-5 blur-3xl" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [.4,0,.2,1] }}
+        className="w-full max-w-sm relative z-10"
+      >
+        {/* Logo */}
+        <div className="text-center mb-9">
+          <h1 className="font-display text-5xl text-white tracking-tight">Mémoire</h1>
+          <p className="text-[var(--stone-400)] mt-2 text-sm tracking-wide uppercase">
+            {mode === 'login' ? 'Admin Sign In' : 'Create Account'}
+          </p>
+        </div>
+
+        <Card className="p-8">
+          <form onSubmit={submit} className="flex flex-col gap-5">
+            {mode === 'register' && (
+              <Input
+                label="Your name"
+                placeholder="Jane Smith"
+                value={form.name}
+                onChange={set('name')}
+                autoComplete="name"
+              />
+            )}
+            <Input
+              label="Email"
+              type="email"
+              placeholder="you@example.com"
+              value={form.email}
+              onChange={set('email')}
+              required
+              autoComplete="email"
+            />
+            <Input
+              label="Password"
+              type="password"
+              placeholder={mode === 'register' ? 'At least 8 characters' : '••••••••'}
+              value={form.password}
+              onChange={set('password')}
+              required
+              minLength={8}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            />
+            <Button type="submit" size="lg" loading={busy} className="w-full mt-1">
+              {mode === 'login' ? 'Sign In' : 'Create Account'}
+            </Button>
+          </form>
+
+          <p className="text-center text-sm text-[var(--stone-500)] mt-5">
+            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+            <button
+              type="button"
+              onClick={() => setMode(m => m === 'login' ? 'register' : 'login')}
+              className="text-[var(--gold-500)] hover:underline font-medium"
+            >
+              {mode === 'login' ? 'Sign up' : 'Sign in'}
+            </button>
+          </p>
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
