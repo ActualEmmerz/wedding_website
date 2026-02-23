@@ -1,4 +1,4 @@
-# Mémoire 📸 — Event Photo Sharing App
+# Mémoire — Event Photo Sharing App
 
 Mémoire is a **QR-code-based photo/video sharing web app** for events (weddings, birthdays, parties, school events, etc.).
 
